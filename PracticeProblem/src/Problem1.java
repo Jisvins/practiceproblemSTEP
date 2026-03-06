@@ -1,61 +1,67 @@
-import java.util.HashMap;
-import java.util.Scanner;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class StepProblem1 {
+public class StepProblem2 {
 
-    // username -> userId
-    static HashMap<String, Integer> users = new HashMap<>();
+    // Product stock stored in hash table for O(1) lookup
+    private static ConcurrentHashMap<String, AtomicInteger> inventory = new ConcurrentHashMap<>();
 
-    // username -> attempt count
-    static HashMap<String, Integer> attempts = new HashMap<>();
+    // Waiting list for products when stock is exhausted
+    private static ConcurrentHashMap<String, Queue<String>> waitingList = new ConcurrentHashMap<>();
 
-    // Check if username exists
-    public static boolean isAvailable(String username) {
-        return !users.containsKey(username);
+    public static void main(String[] args) throws InterruptedException {
+
+        // Initialize product with 100 units
+        inventory.put("IPHONE15", new AtomicInteger(100));
+        waitingList.put("IPHONE15", new ConcurrentLinkedQueue<>());
+
+        // Simulate 50000 concurrent customers
+        int customers = 50000;
+        ExecutorService executor = Executors.newFixedThreadPool(100);
+
+        for (int i = 1; i <= customers; i++) {
+            String customerId = "Customer-" + i;
+            executor.execute(() -> purchaseProduct(customerId, "IPHONE15"));
+        }
+
+        executor.shutdown();
+        executor.awaitTermination(1, TimeUnit.MINUTES);
+
+        System.out.println("Final Stock: " + checkStock("IPHONE15"));
+        System.out.println("Waiting List Size: " + waitingList.get("IPHONE15").size());
     }
 
-    // Suggest similar usernames
-    public static void suggestUsername(String username) {
-        System.out.println("Username taken. Suggestions:");
+    // Purchase product safely under concurrency
+    public static void purchaseProduct(String customerId, String productId) {
 
-        for (int i = 1; i <= 3; i++) {
-            String suggestion = username + i;
+        AtomicInteger stock = inventory.get(productId);
 
-            if (!users.containsKey(suggestion)) {
-                System.out.println(suggestion);
+        if (stock == null) {
+            System.out.println("Product not found.");
+            return;
+        }
+
+        while (true) {
+            int currentStock = stock.get();
+
+            if (currentStock <= 0) {
+                waitingList.get(productId).add(customerId);
+                return;
+            }
+
+            // Atomic decrement to avoid overselling
+            if (stock.compareAndSet(currentStock, currentStock - 1)) {
+                System.out.println(customerId + " purchased " + productId +
+                        " | Remaining Stock: " + (currentStock - 1));
+                return;
             }
         }
     }
 
-    // Track how many times username is searched
-    public static void trackAttempt(String username) {
-        attempts.put(username, attempts.getOrDefault(username, 0) + 1);
-    }
-
-    public static void main(String[] args) {
-
-        Scanner sc = new Scanner(System.in);
-
-        // sample existing users
-        users.put("john", 1);
-        users.put("alex", 2);
-        users.put("sam", 3);
-
-        System.out.print("Enter username: ");
-        String username = sc.nextLine();
-
-        // track attempt
-        trackAttempt(username);
-
-        if (isAvailable(username)) {
-            System.out.println("Username is available!");
-        } else {
-            suggestUsername(username);
-        }
-
-        // show attempt count
-        System.out.println("Search count: " + attempts.get(username));
-
-        sc.close();
+    // Instant stock availability check
+    public static int checkStock(String productId) {
+        AtomicInteger stock = inventory.get(productId);
+        return stock != null ? stock.get() : 0;
     }
 }
